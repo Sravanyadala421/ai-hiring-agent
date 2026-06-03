@@ -305,6 +305,20 @@ def main():
     # Sidebar configuration
     st.sidebar.header("⚙️ Configuration")
     
+    # Add toggle for GitHub fetching
+    skip_github = st.sidebar.checkbox(
+        "⚡ Skip GitHub Data (Faster)", 
+        value=True,
+        help="Disable GitHub data fetching for 5x faster analysis. Enable only if resume has GitHub profile."
+    )
+    
+    if skip_github:
+        os.environ['SKIP_GITHUB'] = 'true'
+        st.sidebar.info("GitHub fetching: DISABLED (faster)")
+    else:
+        os.environ['SKIP_GITHUB'] = 'false'
+        st.sidebar.warning("GitHub fetching: ENABLED (slower)")
+    
     # Check environment configuration
     # Try to read from Streamlit secrets first, then environment variables
     try:

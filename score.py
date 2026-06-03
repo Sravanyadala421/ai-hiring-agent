@@ -241,7 +241,14 @@ def _main_with_timeout(pdf_path):
 
     # Check if cache exists and we're in development mode
     github_data = {}
-    if DEVELOPMENT_MODE and os.path.exists(github_cache_filename):
+    
+    # Check if GitHub fetching should be skipped
+    skip_github = os.environ.get('SKIP_GITHUB', 'false').lower() == 'true'
+    
+    if skip_github:
+        print("ℹ️ Skipping GitHub data fetch (SKIP_GITHUB=true)")
+        github_data = {}
+    elif DEVELOPMENT_MODE and os.path.exists(github_cache_filename):
         print(f"Loading cached data from {github_cache_filename}")
         github_data = json.loads(Path(github_cache_filename).read_text())
     else:
