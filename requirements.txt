@@ -2,6 +2,7 @@ streamlit
 plotly
 pandas
 PyMuPDF
+pymupdf4llm
 pydantic
 requests
 Jinja2
