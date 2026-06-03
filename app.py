@@ -378,32 +378,38 @@ def main():
                     
                 else:
                     # Real analysis
-                    status_text.text("🔄 Starting analysis...")
-                    progress_bar.progress(10)
+                    with st.spinner("🔄 Starting analysis..."):
+                        progress_bar.progress(10)
+                        time.sleep(0.5)
                     
                     try:
-                        status_text.text("📄 Extracting text from PDF...")
-                        progress_bar.progress(30)
+                        with st.spinner("📄 Extracting text from PDF..."):
+                            progress_bar.progress(30)
+                            time.sleep(0.5)
                         
                         # Capture the output from score_resume
                         old_stdout = sys.stdout
                         captured_output = io.StringIO()
                         sys.stdout = captured_output
                         
-                        status_text.text("🤖 AI is analyzing the resume... (This may take 1-2 minutes)")
-                        progress_bar.progress(50)
-                        
-                        try:
-                            evaluation_result = score_resume(tmp_file_path)
-                            progress_bar.progress(90)
-                        except Exception as analysis_error:
-                            progress_bar.progress(100)
-                            status_text.text("❌ Analysis failed")
-                            st.error(f"❌ Analysis failed: {str(analysis_error)}")
-                            if "quota" in str(analysis_error).lower() or "rate limit" in str(analysis_error).lower():
-                                st.error("🚫 API quota exceeded. Please try again later or check your API limits.")
-                                st.info("💡 Tip: Try 'Demo Mode' to see how the analysis results look, or wait for API limits to reset.")
-                            evaluation_result = None
+                        with st.spinner("🤖 AI is analyzing the resume... This usually takes 30-60 seconds"):
+                            status_text.text("🤖 Analyzing with Gemini AI...")
+                            progress_bar.progress(50)
+                            
+                            try:
+                                evaluation_result = score_resume(tmp_file_path)
+                                progress_bar.progress(90)
+                            except Exception as analysis_error:
+                                progress_bar.progress(100)
+                                status_text.text("❌ Analysis failed")
+                                st.error(f"❌ Analysis failed: {str(analysis_error)}")
+                                if "timeout" in str(analysis_error).lower():
+                                    st.error("⏱️ API request timed out. The Gemini API took too long to respond (>60s).")
+                                    st.info("💡 Try again - sometimes the API is slow. Or use 'Demo Mode' to see sample results.")
+                                elif "quota" in str(analysis_error).lower() or "rate limit" in str(analysis_error).lower():
+                                    st.error("🚫 API quota exceeded. Please try again later or check your API limits.")
+                                    st.info("💡 Tip: Try 'Demo Mode' to see how the analysis results look, or wait for API limits to reset.")
+                                evaluation_result = None
                         
                         # Restore stdout
                         sys.stdout = old_stdout
