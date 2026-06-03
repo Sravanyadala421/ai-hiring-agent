@@ -70,12 +70,13 @@ class PDFHandler:
         try:
             start_time = time.time()
             logger.debug(
-                f"🔄 Extracting {section_name} section using advanced API management..."
+                f"🔄 Extracting {section_name} section using {DEFAULT_MODEL}..."
             )
 
-            # Use the new cached API call system
-            from llm_utils import make_cached_api_call
-            
+            model_params = MODEL_PARAMETERS.get(
+                DEFAULT_MODEL, {"temperature": 0.1, "top_p": 0.9}
+            )
+
             section_system_message = self.template_manager.render_template(
                 "system_message", section_name_param=section_name
             )
@@ -85,25 +86,30 @@ class PDFHandler:
                 )
                 return None
 
-            messages = [
-                {"role": "system", "content": section_system_message},
-                {"role": "user", "content": prompt}
-            ]
-            
-            # Use smart caching and rotation
-            response_content = make_cached_api_call(
-                content=text_content,
-                messages=messages,
-                operation=f"extract_{section_name}",
-                model_name=DEFAULT_MODEL
-            )
-            
-            if not response_content:
-                logger.error(f"❌ Failed to get response for {section_name} section")
-                return None
+            chat_params = {
+                "model": DEFAULT_MODEL,
+                "messages": [
+                    {"role": "system", "content": section_system_message},
+                    {"role": "user", "content": prompt},
+                ],
+                "options": {
+                    "stream": False,
+                    "temperature": model_params["temperature"],
+                    "top_p": model_params["top_p"],
+                },
+            }
+
+            kwargs = {}
+            if return_model:
+                kwargs["format"] = return_model.model_json_schema()
+
+            # Use the appropriate provider to make the API call
+            response = self.provider.chat(**chat_params, **kwargs)
+
+            response_text = response["message"]["content"]
 
             try:
-                response_text = extract_json_from_response(response_content)
+                response_text = extract_json_from_response(response_text)
                 json_start = response_text.find("{")
                 json_end = response_text.rfind("}")
                 if json_start != -1 and json_end != -1:
@@ -115,13 +121,13 @@ class PDFHandler:
                 end_time = time.time()
                 total_time = end_time - start_time
                 logger.debug(
-                    f"⏱️ Total time for {section_name} extraction: {total_time:.2f} seconds"
+                    f"⏱️ Total time for separate section extraction: {total_time:.2f} seconds"
                 )
 
                 return transformed_data
             except json.JSONDecodeError as e:
                 logger.error(f"❌ Error parsing JSON for {section_name} section: {e}")
-                logger.error(f"Raw response: {response_content}")
+                logger.error(f"Raw response: {response_text}")
                 return None
 
         except Exception as e:

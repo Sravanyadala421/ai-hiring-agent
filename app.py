@@ -317,24 +317,6 @@ def main():
             st.sidebar.error("⚠️ Gemini API key not configured!")
         else:
             st.sidebar.success("✅ Gemini API configured")
-        
-        # Show API usage statistics
-        try:
-            from api_manager import api_rotator
-            stats = api_rotator.get_usage_stats()
-            
-            with st.sidebar.expander("📊 API Status"):
-                st.write(f"**Total API Keys:** {stats['total_keys']}")
-                
-                available_keys = sum(1 for key in stats['keys_status'] if key['available'])
-                st.write(f"**Available Keys:** {available_keys}/{stats['total_keys']}")
-                
-                if stats['keys_status']:
-                    for key_status in stats['keys_status'][:3]:  # Show first 3
-                        status_emoji = "🟢" if key_status['available'] else "🔴"
-                        st.write(f"{status_emoji} {key_status['key_id']}: {key_status['requests_today']} requests today")
-        except Exception as e:
-            st.sidebar.info("API status not available")
     else:
         st.sidebar.warning("⚠️ Using Ollama - ensure it's running locally")
     
