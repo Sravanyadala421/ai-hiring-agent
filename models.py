@@ -272,9 +272,13 @@ class OllamaProvider:
     """Ollama LLM provider implementation."""
 
     def __init__(self):
-        import ollama
-
-        self.client = ollama
+        try:
+            import ollama
+            self.client = ollama
+        except ImportError:
+            raise ImportError(
+                "Ollama package not installed. Install it with: pip install ollama"
+            )
 
     def chat(
         self,

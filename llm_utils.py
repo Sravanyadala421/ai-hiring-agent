@@ -47,16 +47,18 @@ def initialize_llm_provider(model_name: str) -> Any:
     Returns:
         An initialized LLM provider (either OllamaProvider or GeminiProvider)
     """
-    # Default to Ollama provider
-    provider = OllamaProvider()
-    # If using Gemini and API key is available, use Gemini provider
+    # Determine which provider to use
     model_provider = MODEL_PROVIDER_MAPPING.get(model_name, ModelProvider.OLLAMA)
+    
     if model_provider == ModelProvider.GEMINI:
         if not GEMINI_API_KEY:
             logger.warning("⚠️ Gemini API key not found. Falling back to Ollama.")
+            provider = OllamaProvider()
         else:
             logger.info(f"🔄 Using Google Gemini API provider with model {model_name}")
             provider = GeminiProvider(api_key=GEMINI_API_KEY)
     else:
         logger.info(f"🔄 Using Ollama provider with model {model_name}")
+        provider = OllamaProvider()
+    
     return provider
