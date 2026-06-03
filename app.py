@@ -306,8 +306,15 @@ def main():
     st.sidebar.header("⚙️ Configuration")
     
     # Check environment configuration
-    llm_provider = os.getenv('LLM_PROVIDER', 'ollama')
-    default_model = os.getenv('DEFAULT_MODEL', 'gemma3:4b')
+    # Try to read from Streamlit secrets first, then environment variables
+    try:
+        llm_provider = st.secrets.get('LLM_PROVIDER', os.getenv('LLM_PROVIDER', 'ollama'))
+        default_model = st.secrets.get('DEFAULT_MODEL', os.getenv('DEFAULT_MODEL', 'gemma3:4b'))
+        api_key = st.secrets.get('GEMINI_API_KEY', os.getenv('GEMINI_API_KEY', ''))
+    except (FileNotFoundError, AttributeError):
+        llm_provider = os.getenv('LLM_PROVIDER', 'ollama')
+        default_model = os.getenv('DEFAULT_MODEL', 'gemma3:4b')
+        api_key = os.getenv('GEMINI_API_KEY', '')
     
     st.sidebar.info(f"**LLM Provider:** {llm_provider}\n**Model:** {default_model}")
     
