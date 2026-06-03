@@ -194,7 +194,8 @@ def fetch_repo_contributors(owner: str, repo_name: str) -> list[dict]:
         return []
 
 
-def fetch_all_github_repos(github_url: str, max_repos: int = 100) -> List[Dict]:
+def fetch_all_github_repos(github_url: str, max_repos: int = 15) -> List[Dict]:
+    """Fetch GitHub repos with a strict limit to prevent timeouts."""
     try:
         username = extract_github_username(github_url)
         if not username:
@@ -203,24 +204,38 @@ def fetch_all_github_repos(github_url: str, max_repos: int = 100) -> List[Dict]:
 
         api_url = f"https://api.github.com/users/{username}/repos"
 
-        params = {"sort": "updated", "per_page": min(max_repos, 100), "type": "all"}
+        # Reduce to max 15 repos to prevent timeout
+        params = {"sort": "updated", "per_page": min(max_repos, 15), "type": "all"}
 
         status_code, repos_data = _fetch_github_api(api_url, params=params)
 
         if status_code == 200:
             projects = []
+            processed_count = 0
+            max_to_process = 15  # Hard limit to prevent timeout
+            
             for repo in repos_data:
+                if processed_count >= max_to_process:
+                    print(f"⏱️ Reached max repo limit ({max_to_process}) to prevent timeout")
+                    break
+                
+                # Skip forks with low activity
                 if repo.get("fork") and repo.get("forks_count", 0) < 5:
                     continue
 
                 repo_name = repo.get("name")
-
-                contributors_data = fetch_repo_contributors(username, repo_name)
-                contributor_count = len(contributors_data)
-
-                user_contributions, total_contributions = fetch_contributions_count(
-                    username, contributors_data
-                )
+                
+                # For forks, don't fetch contributors to save time
+                if repo.get("fork"):
+                    contributor_count = 1
+                    user_contributions = repo.get("stargazers_count", 0)
+                    total_contributions = user_contributions
+                else:
+                    contributors_data = fetch_repo_contributors(username, repo_name)
+                    contributor_count = len(contributors_data)
+                    user_contributions, total_contributions = fetch_contributions_count(
+                        username, contributors_data
+                    )
 
                 project_type = (
                     "open_source" if contributor_count > 1 else "self_project"
@@ -255,6 +270,7 @@ def fetch_all_github_repos(github_url: str, max_repos: int = 100) -> List[Dict]:
                     },
                 }
                 projects.append(project)
+                processed_count += 1
 
             projects.sort(key=lambda x: x["github_details"]["stars"], reverse=True)
 
