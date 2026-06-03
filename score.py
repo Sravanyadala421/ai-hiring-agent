@@ -198,6 +198,16 @@ def find_profile(profiles, network):
 
 
 def main(pdf_path):
+    """Main function with overall timeout protection."""
+    try:
+        return _main_with_timeout(pdf_path)
+    except Exception as e:
+        logger.error(f"Analysis failed: {str(e)}")
+        raise
+
+
+def _main_with_timeout(pdf_path):
+    """Internal main function that can be timed out."""
     # Create cache filename based on PDF path
     cache_filename = (
         f"cache/resumecache_{os.path.basename(pdf_path).replace('.pdf', '')}.json"
@@ -247,8 +257,54 @@ def main(pdf_path):
         github_profile = find_profile(profiles, "Github")
 
         if github_profile:
-            github_data = fetch_and_display_github_info(github_profile.url)
-        if DEVELOPMENT_MODE:
+            try:
+                # Add timeout protection for GitHub fetching
+                import signal
+                
+                def timeout_handler(signum, frame):
+                    raise TimeoutError("GitHub data fetch timed out")
+                
+                # Set 30 second timeout for GitHub fetch (Unix only)
+                try:
+                    signal.signal(signal.SIGALRM, timeout_handler)
+                    signal.alarm(30)  # 30 second timeout
+                    github_data = fetch_and_display_github_info(github_profile.url)
+                    signal.alarm(0)  # Cancel alarm
+                except (AttributeError, ValueError):
+                    # Windows doesn't support SIGALRM, use threading instead
+                    import threading
+                    result_container = {}
+                    
+                    def fetch_with_timeout():
+                        try:
+                            result_container['data'] = fetch_and_display_github_info(github_profile.url)
+                        except Exception as e:
+                            result_container['error'] = str(e)
+                    
+                    thread = threading.Thread(target=fetch_with_timeout)
+                    thread.daemon = True
+                    thread.start()
+                    thread.join(timeout=30)  # 30 second timeout
+                    
+                    if thread.is_alive():
+                        print("⚠️ GitHub fetch timed out after 30 seconds, continuing without GitHub data")
+                        github_data = {}
+                    elif 'error' in result_container:
+                        print(f"⚠️ GitHub fetch failed: {result_container['error']}")
+                        github_data = {}
+                    else:
+                        github_data = result_container.get('data', {})
+                        
+            except TimeoutError:
+                print("⚠️ GitHub fetch timed out, continuing without GitHub data")
+                github_data = {}
+            except Exception as e:
+                print(f"⚠️ Failed to fetch GitHub data: {e}")
+                github_data = {}
+        else:
+            print("ℹ️ No GitHub profile found in resume")
+            
+        if DEVELOPMENT_MODE and github_data:
             os.makedirs(os.path.dirname(github_cache_filename), exist_ok=True)
             Path(github_cache_filename).write_text(
                 json.dumps(github_data, indent=2, ensure_ascii=False),
