@@ -9,16 +9,24 @@ import os
 from dotenv import load_dotenv
 from models import ModelProvider
 
-# Load environment variables
+# Load environment variables from .env file (for local development)
 load_dotenv()
+
+# Try to get from Streamlit secrets first (for cloud deployment), then fall back to env vars
+try:
+    import streamlit as st
+    GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", os.getenv("GEMINI_API_KEY", ""))
+    DEFAULT_MODEL = st.secrets.get("DEFAULT_MODEL", os.getenv("DEFAULT_MODEL", "gemma3:4b"))
+    PROVIDER = st.secrets.get("LLM_PROVIDER", os.getenv("LLM_PROVIDER", "ollama"))
+except (ImportError, FileNotFoundError, AttributeError):
+    # Streamlit not available or no secrets file - use environment variables
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+    DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "gemma3:4b")
+    PROVIDER = os.getenv("LLM_PROVIDER", "ollama")
 
 # Constants
 DEFAULT_MODEL_NAME = "gemma3:4b"
 DEFAULT_PROVIDER = ModelProvider.OLLAMA
-
-# Get model and provider from environment or use defaults
-DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", DEFAULT_MODEL_NAME)
-PROVIDER = os.getenv("LLM_PROVIDER", DEFAULT_PROVIDER.value)
 
 # Validate provider
 if PROVIDER not in [p.value for p in ModelProvider]:
@@ -60,6 +68,3 @@ MODEL_PROVIDER_MAPPING = {
     "gemini-2.5-pro": ModelProvider.GEMINI,
     "gemini-3.1-flash-lite": ModelProvider.GEMINI,
 }
-
-# Get API keys from environment
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
