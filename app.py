@@ -141,14 +141,40 @@ def create_comparison_chart(csv_file_path):
         if df.empty:
             return None
         
+        # Check if required columns exist
+        if 'name' not in df.columns or 'total_score' not in df.columns:
+            # Try alternative column names
+            name_col = None
+            score_col = None
+            
+            # Look for name column alternatives
+            for col in ['name', 'candidate_name', 'file_name']:
+                if col in df.columns:
+                    name_col = col
+                    break
+            
+            # Look for score column alternatives  
+            for col in ['total_score', 'score', 'overall_score']:
+                if col in df.columns:
+                    score_col = col
+                    break
+            
+            if not name_col or not score_col:
+                return None
+        else:
+            name_col = 'name'
+            score_col = 'total_score'
+        
         # Create bar chart comparing candidates
+        recent_data = df.tail(10)  # Show last 10 evaluations
+        
         fig = px.bar(
-            df.tail(10),  # Show last 10 evaluations
-            x='candidate_name',
-            y='total_score',
+            recent_data,
+            x=name_col,
+            y=score_col,
             title='Recent Candidate Comparisons',
-            labels={'total_score': 'Total Score', 'candidate_name': 'Candidate'},
-            color='total_score',
+            labels={score_col: 'Total Score', name_col: 'Candidate'},
+            color=score_col,
             color_continuous_scale='viridis'
         )
         
@@ -407,27 +433,42 @@ def main():
                 df = pd.read_csv(csv_path)
                 if not df.empty:
                     st.metric("Total Evaluations", len(df))
-                    if 'total_score' in df.columns:
-                        avg_score = df['total_score'].mean()
+                    
+                    # Find the score column
+                    score_column = None
+                    for col in ['total_score', 'score', 'overall_score']:
+                        if col in df.columns:
+                            score_column = col
+                            break
+                    
+                    if score_column:
+                        avg_score = df[score_column].mean()
                         st.metric("Average Score", f"{avg_score:.1f}")
                         
                         # Show recent evaluations - handle missing columns gracefully
                         display_columns = []
-                        if 'candidate_name' in df.columns:
-                            display_columns.append('candidate_name')
-                        if 'total_score' in df.columns:
-                            display_columns.append('total_score')
+                        name_column = None
                         
-                        if display_columns:
+                        # Find name column
+                        for col in ['name', 'candidate_name', 'file_name']:
+                            if col in df.columns:
+                                name_column = col
+                                break
+                        
+                        if name_column:
+                            display_columns = [name_column, score_column]
+                            
                             st.subheader("Recent Evaluations")
                             recent = df.tail(5)[display_columns].copy()
                             # Rename columns for display
                             column_mapping = {
-                                'candidate_name': 'Candidate',
-                                'total_score': 'Score'
+                                name_column: 'Candidate',
+                                score_column: 'Score'
                             }
                             recent.columns = [column_mapping.get(col, col) for col in recent.columns]
                             st.dataframe(recent, use_container_width=True)
+                    else:
+                        st.info("Score data not available in expected format")
                 else:
                     st.info("No evaluations yet")
             except Exception as e:
