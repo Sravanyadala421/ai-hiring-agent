@@ -46,10 +46,14 @@ class ResumeEvaluator:
         return criteria_template
 
     def evaluate_resume(self, resume_text: str) -> EvaluationData:
+        """Evaluate resume using advanced API management with caching and rotation."""
         self._last_resume_text = resume_text
         full_prompt = self._load_evaluation_prompt(resume_text)
-        # logger.info(f"🔤 Evaluation prompt being sent: {full_prompt}")
+        
         try:
+            # Use the new cached API call system
+            from llm_utils import make_cached_api_call
+            
             system_message = self.template_manager.render_template(
                 "resume_evaluation_system_message"
             )
@@ -58,28 +62,24 @@ class ResumeEvaluator:
                     "Failed to load resume evaluation system message template"
                 )
 
-            # Prepare chat parameters
-            chat_params = {
-                "model": self.model_name,
-                "messages": [
-                    {"role": "system", "content": system_message},
-                    {"role": "user", "content": full_prompt},
-                ],
-                "options": {
-                    "stream": False,
-                    "temperature": self.model_params.get("temperature", 0.5),
-                    "top_p": self.model_params.get("top_p", 0.9),
-                },
-            }
+            messages = [
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": full_prompt}
+            ]
+            
+            # Use smart caching and rotation for evaluation
+            response_content = make_cached_api_call(
+                content=resume_text,
+                messages=messages,
+                operation="resume_evaluation",
+                model_name=self.model_name
+            )
+            
+            if not response_content:
+                raise Exception("Failed to get evaluation response from API")
 
-            # Add format parameter for structured output
-            kwargs = {"format": EvaluationData.model_json_schema()}
-            # Use the appropriate provider to make the API call
-            response = self.provider.chat(**chat_params, **kwargs)
-
-            response_text = response["message"]["content"]
-            response_text = extract_json_from_response(response_text)
-            logger.error(f"🔤 Prompt response: {response_text}")
+            response_text = extract_json_from_response(response_content)
+            logger.info(f"🔤 Evaluation response received: {len(response_text)} characters")
 
             evaluation_dict = json.loads(response_text)
             evaluation_data = EvaluationData(**evaluation_dict)
