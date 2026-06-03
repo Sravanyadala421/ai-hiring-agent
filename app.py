@@ -12,12 +12,66 @@ import sys
 import tempfile
 from pathlib import Path
 import json
-from score import main as score_resume
-from models import EvaluationData
-from demo_data import get_demo_evaluation
 import io
 import contextlib
 import time
+import logging
+
+# ---------------------------------------------------------------------------
+# Logging — write to stderr so Railway captures it in deploy logs
+# ---------------------------------------------------------------------------
+logging.basicConfig(
+    stream=sys.stderr,
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+_log = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Optional heavy imports — deferred so a missing dependency doesn't prevent
+# the Streamlit page from rendering at all.  Each flag tracks whether the
+# corresponding module loaded successfully.
+# ---------------------------------------------------------------------------
+_score_resume = None       # populated on first use
+_SCORE_IMPORT_ERROR: str | None = None
+
+_EvaluationData = None
+_MODELS_IMPORT_ERROR: str | None = None
+
+_get_demo_evaluation = None
+_DEMO_IMPORT_ERROR: str | None = None
+
+try:
+    from models import EvaluationData as _EvaluationData
+    _log.info("models imported successfully")
+except Exception as _e:
+    _MODELS_IMPORT_ERROR = f"{type(_e).__name__}: {_e}"
+    _log.error("Failed to import models: %s", _MODELS_IMPORT_ERROR)
+
+try:
+    from demo_data import get_demo_evaluation as _get_demo_evaluation
+    _log.info("demo_data imported successfully")
+except Exception as _e:
+    _DEMO_IMPORT_ERROR = f"{type(_e).__name__}: {_e}"
+    _log.error("Failed to import demo_data: %s", _DEMO_IMPORT_ERROR)
+
+
+def _load_score_module():
+    """Import score.main lazily and cache it; return (fn, error_str)."""
+    global _score_resume, _SCORE_IMPORT_ERROR
+    if _score_resume is not None:
+        return _score_resume, None
+    if _SCORE_IMPORT_ERROR is not None:
+        return None, _SCORE_IMPORT_ERROR
+    try:
+        from score import main as _fn
+        _score_resume = _fn
+        _log.info("score module imported successfully")
+        return _score_resume, None
+    except Exception as _e:
+        _SCORE_IMPORT_ERROR = f"{type(_e).__name__}: {_e}"
+        _log.error("Failed to import score: %s", _SCORE_IMPORT_ERROR)
+        return None, _SCORE_IMPORT_ERROR
 
 # Page configuration
 st.set_page_config(
@@ -297,10 +351,27 @@ def display_evaluation_results(evaluation_result, console_output="", is_demo=Fal
 
 def main():
     """Main Streamlit application."""
-    
+
+    # ------------------------------------------------------------------
+    # Surface any import errors prominently so they appear in the UI and
+    # in the deploy logs rather than causing a silent crash.
+    # ------------------------------------------------------------------
+    import_errors = []
+    if _MODELS_IMPORT_ERROR:
+        import_errors.append(("models", _MODELS_IMPORT_ERROR))
+    if _DEMO_IMPORT_ERROR:
+        import_errors.append(("demo_data", _DEMO_IMPORT_ERROR))
+
+    if import_errors:
+        st.error("⚠️ **Startup import errors detected** — some features may be unavailable.")
+        for module_name, err in import_errors:
+            st.error(f"**`{module_name}`**: `{err}`")
+            _log.error("Import error surfaced in UI — module=%s error=%s", module_name, err)
+
     # Header
     st.markdown('<div class="main-header">🤖 AI Hiring Agent</div>', unsafe_allow_html=True)
     st.markdown("### Upload a resume PDF to get an AI-powered evaluation with detailed scoring and feedback")
+
     
     # Sidebar configuration
     st.sidebar.header("⚙️ Configuration")
@@ -360,68 +431,89 @@ def main():
                     status_text.text("🎭 Loading demo results...")
                     progress_bar.progress(50)
                     time.sleep(1)  # Simulate processing
-                    evaluation_result = get_demo_evaluation()
-                    console_output = "Demo mode: Using sample evaluation data"
-                    progress_bar.progress(100)
-                    status_text.text("✅ Demo results loaded!")
-                    st.info("🎭 **Demo Mode**: This is sample evaluation data. Upload your resume and use 'Analyze Resume' for real results.")
-                    
-                    # Display demo results
-                    display_evaluation_results(evaluation_result, console_output, is_demo=True)
+                    if _get_demo_evaluation is None:
+                        progress_bar.progress(100)
+                        status_text.text("❌ Demo unavailable")
+                        st.error(f"❌ Demo mode unavailable — demo_data failed to import: `{_DEMO_IMPORT_ERROR}`")
+                    else:
+                        evaluation_result = _get_demo_evaluation()
+                        console_output = "Demo mode: Using sample evaluation data"
+                        progress_bar.progress(100)
+                        status_text.text("✅ Demo results loaded!")
+                        st.info("🎭 **Demo Mode**: This is sample evaluation data. Upload your resume and use 'Analyze Resume' for real results.")
+                        
+                        # Display demo results
+                        display_evaluation_results(evaluation_result, console_output, is_demo=True)
+
                     
                 else:
                     # Real analysis
                     status_text.text("🔄 Starting analysis...")
                     progress_bar.progress(10)
-                    
-                    try:
-                        status_text.text("📄 Extracting text from PDF...")
-                        progress_bar.progress(30)
-                        
-                        # Capture the output from score_resume
-                        old_stdout = sys.stdout
-                        captured_output = io.StringIO()
-                        sys.stdout = captured_output
-                        
-                        status_text.text("🤖 AI is analyzing the resume... (This may take 1-2 minutes)")
-                        progress_bar.progress(50)
-                        
+
+                    # Attempt to load the score module lazily — surface any
+                    # import error immediately rather than crashing silently.
+                    score_fn, score_import_err = _load_score_module()
+                    if score_fn is None:
+                        progress_bar.progress(100)
+                        status_text.text("❌ Cannot run analysis")
+                        st.error(
+                            f"❌ **Import error** — the `score` module could not be loaded:\n\n"
+                            f"`{score_import_err}`\n\n"
+                            "Check the deploy logs for the full traceback."
+                        )
+                        _log.error("score module unavailable at analysis time: %s", score_import_err)
+                    else:
                         try:
-                            evaluation_result = score_resume(tmp_file_path)
-                            progress_bar.progress(90)
-                        except Exception as analysis_error:
+                            status_text.text("📄 Extracting text from PDF...")
+                            progress_bar.progress(30)
+
+                            # Capture the output from score_fn
+                            old_stdout = sys.stdout
+                            captured_output = io.StringIO()
+                            sys.stdout = captured_output
+
+                            status_text.text("🤖 AI is analyzing the resume... (This may take 1-2 minutes)")
+                            progress_bar.progress(50)
+
+                            try:
+                                evaluation_result = score_fn(tmp_file_path)
+                                progress_bar.progress(90)
+                            except Exception as analysis_error:
+                                progress_bar.progress(100)
+                                status_text.text("❌ Analysis failed")
+                                st.error(f"❌ Analysis failed: {str(analysis_error)}")
+                                _log.exception("Analysis error for %s", tmp_file_path)
+                                if "quota" in str(analysis_error).lower() or "rate limit" in str(analysis_error).lower():
+                                    st.error("🚫 API quota exceeded. Please try again later or check your API limits.")
+                                    st.info("💡 Tip: Try 'Demo Mode' to see how the analysis results look, or wait for API limits to reset.")
+                                evaluation_result = None
+
+                            # Restore stdout
+                            sys.stdout = old_stdout
+                            console_output = captured_output.getvalue()
+
                             progress_bar.progress(100)
-                            status_text.text("❌ Analysis failed")
-                            st.error(f"❌ Analysis failed: {str(analysis_error)}")
-                            if "quota" in str(analysis_error).lower() or "rate limit" in str(analysis_error).lower():
-                                st.error("🚫 API quota exceeded. Please try again later or check your API limits.")
-                                st.info("💡 Tip: Try 'Demo Mode' to see how the analysis results look, or wait for API limits to reset.")
-                            evaluation_result = None
-                        
-                        # Restore stdout
-                        sys.stdout = old_stdout
-                        console_output = captured_output.getvalue()
-                        
-                        progress_bar.progress(100)
-                        status_text.text("✅ Analysis completed!")
-                        
-                        if evaluation_result:
-                            display_evaluation_results(evaluation_result, console_output, is_demo=False)
-                        else:
-                            st.error("❌ Analysis failed. Please check the console output or try Demo Mode.")
-                    
-                    except Exception as e:
-                        progress_bar.progress(100)
-                        status_text.text("❌ Error occurred")
-                        st.error(f"❌ Error during analysis: {str(e)}")
-                        st.exception(e)
-                    
-                    finally:
-                        # Clean up temporary file
-                        try:
-                            os.unlink(tmp_file_path)
-                        except:
-                            pass
+                            status_text.text("✅ Analysis completed!")
+
+                            if evaluation_result:
+                                display_evaluation_results(evaluation_result, console_output, is_demo=False)
+                            else:
+                                st.error("❌ Analysis failed. Please check the console output or try Demo Mode.")
+
+                        except Exception as e:
+                            progress_bar.progress(100)
+                            status_text.text("❌ Error occurred")
+                            st.error(f"❌ Error during analysis: {str(e)}")
+                            st.exception(e)
+                            _log.exception("Unexpected error during analysis")
+
+                        finally:
+                            # Clean up temporary file
+                            try:
+                                os.unlink(tmp_file_path)
+                            except Exception:
+                                pass
     
     with col2:
         st.header("📊 Statistics")
